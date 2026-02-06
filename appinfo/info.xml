@@ -17,7 +17,7 @@ Integrate Valtimo business process management and case management with your Next
 - Valtimo server instance
 - Nextcloud 28 or higher
     ]]></description>
-    <version>0.1.0</version>
+    <version>0.1.1-beta.1</version>
     <licence>agpl</licence>
     <author mail="info@conduction.nl" homepage="https://www.conduction.nl/">Conduction</author>
     <namespace>Valtimo</namespace>
