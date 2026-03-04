@@ -1,30 +1,45 @@
-"""
-Valtimo ExApp - FastAPI wrapper for Nextcloud AppAPI integration
+"""Valtimo ExApp - Nextcloud External Application wrapper for Valtimo BPM/case management.
 
-Valtimo is a less-code platform for Business Process Automation.
+Valtimo is a less-code platform for Business Process Automation built on Camunda.
 See: https://docs.valtimo.nl/
 """
+
+import asyncio
+import logging
 import os
 import subprocess
-import asyncio
-import base64
+import threading
+import typing
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import BackgroundTasks, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from nc_py_api import NextcloudApp
+from nc_py_api.ex_app import (
+    nc_app,
+    run_app,
+    setup_nextcloud_logging,
+)
+from nc_py_api.ex_app.integration_fastapi import AppAPIAuthMiddleware
 
-# Environment variables set by AppAPI
-APP_ID = os.environ.get("APP_ID", "valtimo")
-APP_VERSION = os.environ.get("APP_VERSION", "0.1.0")
-APP_SECRET = os.environ.get("APP_SECRET", "")
-APP_HOST = os.environ.get("APP_HOST", "0.0.0.0")
-APP_PORT = int(os.environ.get("APP_PORT", "9000"))
-NEXTCLOUD_URL = os.environ.get("NEXTCLOUD_URL", "http://nextcloud")
 
-# Valtimo configuration - Spring Boot app runs on 8080
-VALTIMO_PORT = int(os.environ.get("VALTIMO_PORT", "8080"))
+# ── Logging ─────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.WARNING,
+    format="[%(funcName)s]: %(message)s",
+    datefmt="%H:%M:%S",
+)
+LOGGER = logging.getLogger("valtimo")
+LOGGER.setLevel(logging.DEBUG)
+
+
+# ── Configuration ───────────────────────────────────────────────────
+VALTIMO_PORT = 8080
+VALTIMO_URL = f"http://localhost:{VALTIMO_PORT}"
 VALTIMO_PROCESS = None
+
+APP_ID = os.environ.get("APP_ID", "valtimo")
 
 # Keycloak/OIDC configuration
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "")
@@ -33,32 +48,9 @@ KEYCLOAK_CLIENT_ID = os.environ.get("KEYCLOAK_CLIENT_ID", "valtimo")
 KEYCLOAK_CLIENT_SECRET = os.environ.get("KEYCLOAK_CLIENT_SECRET", "")
 
 
-def get_auth_header() -> dict:
-    """Generate AppAPI authentication header"""
-    auth = base64.b64encode(f":{APP_SECRET}".encode()).decode()
-    return {
-        "EX-APP-ID": APP_ID,
-        "EX-APP-VERSION": APP_VERSION,
-        "AUTHORIZATION-APP-API": auth,
-    }
-
-
-async def report_status(progress: int) -> None:
-    """Report initialization progress to Nextcloud"""
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.put(
-                f"{NEXTCLOUD_URL}/ocs/v1.php/apps/app_api/apps/status",
-                headers=get_auth_header(),
-                json={"progress": progress},
-                timeout=10,
-            )
-    except Exception as e:
-        print(f"Failed to report status: {e}")
-
-
+# ── OIDC Environment ───────────────────────────────────────────────
 def get_oidc_env() -> dict:
-    """Get OIDC environment variables for Spring Boot if Keycloak is configured"""
+    """Get OIDC environment variables for Spring Boot if Keycloak is configured."""
     if not KEYCLOAK_URL:
         return {}
 
@@ -71,16 +63,20 @@ def get_oidc_env() -> dict:
         "KEYCLOAK_CREDENTIALS_SECRET": KEYCLOAK_CLIENT_SECRET,
         # Spring Boot OAuth2 Resource Server
         "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI": oidc_url,
-        "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI": f"{oidc_url}/protocol/openid-connect/certs",
+        "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI": (
+            f"{oidc_url}/protocol/openid-connect/certs"
+        ),
         # Valtimo specific Keycloak settings
         "VALTIMO_OAUTH_PUBLIC_KEY": f"{oidc_url}/protocol/openid-connect/certs",
     }
 
 
+# ── Valtimo Process Management ─────────────────────────────────────
 def start_valtimo() -> None:
-    """Start the Valtimo Spring Boot service"""
+    """Start the Valtimo Spring Boot service."""
     global VALTIMO_PROCESS
-    if VALTIMO_PROCESS is not None:
+
+    if VALTIMO_PROCESS is not None and VALTIMO_PROCESS.poll() is None:
         return
 
     env = os.environ.copy()
@@ -89,22 +85,26 @@ def start_valtimo() -> None:
     # Add OIDC configuration if Keycloak is configured
     env.update(get_oidc_env())
     if KEYCLOAK_URL:
-        print(f"OIDC configured with Keycloak at {KEYCLOAK_URL}")
+        LOGGER.info("OIDC configured with Keycloak at %s", KEYCLOAK_URL)
 
-    # Start Valtimo (Spring Boot JAR)
-    cmd = ["java"] + java_opts + ["-jar", "/app/valtimo.jar"]
+    cmd = ["java", *java_opts, "-jar", "/app/valtimo.jar"]
     VALTIMO_PROCESS = subprocess.Popen(
         cmd,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        shell=False,
     )
-    print(f"Valtimo started with PID: {VALTIMO_PROCESS.pid}")
+
+    def log_output():
+        for line in VALTIMO_PROCESS.stdout:
+            LOGGER.info("[valtimo] %s", line.decode().strip())
+
+    threading.Thread(target=log_output, daemon=True).start()
+    LOGGER.info("Valtimo started with PID: %d", VALTIMO_PROCESS.pid)
 
 
 def stop_valtimo() -> None:
-    """Stop the Valtimo service"""
+    """Stop the Valtimo service."""
     global VALTIMO_PROCESS
     if VALTIMO_PROCESS is not None:
         VALTIMO_PROCESS.terminate()
@@ -113,18 +113,17 @@ def stop_valtimo() -> None:
         except subprocess.TimeoutExpired:
             VALTIMO_PROCESS.kill()
         VALTIMO_PROCESS = None
-        print("Valtimo stopped")
+        LOGGER.info("Valtimo stopped")
 
 
 async def wait_for_valtimo(timeout: int = 180) -> bool:
-    """Wait for Valtimo to become healthy (Spring Boot takes time to start)"""
+    """Wait for Valtimo to become healthy (Spring Boot takes time to start)."""
     for _ in range(timeout):
         try:
             async with httpx.AsyncClient() as client:
-                # Spring Boot actuator health endpoint
                 resp = await client.get(
-                    f"http://localhost:{VALTIMO_PORT}/actuator/health",
-                    timeout=2,
+                    f"{VALTIMO_URL}/actuator/health",
+                    timeout=5,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -136,106 +135,146 @@ async def wait_for_valtimo(timeout: int = 180) -> bool:
     return False
 
 
+# ── Lifespan ────────────────────────────────────────────────────────
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan handler"""
-    print(f"Valtimo ExApp starting on {APP_HOST}:{APP_PORT}")
+async def lifespan(_app: FastAPI):
+    setup_nextcloud_logging("valtimo", logging_level=logging.WARNING)
+    LOGGER.info("Starting Valtimo ExApp")
     yield
     stop_valtimo()
-    print("Valtimo ExApp shutdown complete")
+    LOGGER.info("Valtimo ExApp shutdown complete")
 
 
-app = FastAPI(lifespan=lifespan)
+# ── FastAPI App ─────────────────────────────────────────────────────
+APP = FastAPI(lifespan=lifespan)
+APP.add_middleware(AppAPIAuthMiddleware)
 
 
-@app.get("/heartbeat")
-async def heartbeat():
-    """Health check endpoint for AppAPI"""
+# ── Enabled Handler ────────────────────────────────────────────────
+def enabled_handler(enabled: bool, nc: NextcloudApp) -> str:
+    """Handle app enable/disable events."""
+    if enabled:
+        LOGGER.info("Enabling Valtimo ExApp")
+        start_valtimo()
+    else:
+        LOGGER.info("Disabling Valtimo ExApp")
+        stop_valtimo()
+    return ""
+
+
+# ── Required Endpoints ──────────────────────────────────────────────
+@APP.get("/heartbeat")
+async def heartbeat_callback():
+    """Heartbeat endpoint for AppAPI health checks."""
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"http://localhost:{VALTIMO_PORT}/actuator/health",
+                f"{VALTIMO_URL}/actuator/health",
                 timeout=5,
             )
             if resp.status_code == 200:
-                return JSONResponse({"status": "ok"})
+                return JSONResponse(content={"status": "ok"})
     except Exception:
         pass
-    return JSONResponse({"status": "error"}, status_code=503)
+    return JSONResponse(content={"status": "error"}, status_code=503)
 
 
-@app.post("/init")
-async def init(background_tasks: BackgroundTasks):
-    """Initialization endpoint called by AppAPI during deployment"""
-    async def do_init():
-        await report_status(0)
-        print("Starting Valtimo initialization...")
-
-        await report_status(10)
-        start_valtimo()
-
-        await report_status(30)
-        # Valtimo/Spring Boot takes longer to start
-        if await wait_for_valtimo(timeout=180):
-            await report_status(100)
-            print("Valtimo initialization complete")
-        else:
-            print("Valtimo failed to start - check configuration")
-            await report_status(0)
-
-    background_tasks.add_task(do_init)
-    return JSONResponse({"status": "init_started"})
+@APP.post("/init")
+async def init_callback(
+    b_tasks: BackgroundTasks,
+    nc: typing.Annotated[NextcloudApp, Depends(nc_app)],
+):
+    """Initialization endpoint called by AppAPI after installation."""
+    b_tasks.add_task(init_valtimo_task, nc)
+    return JSONResponse(content={})
 
 
-@app.put("/enabled")
-async def enabled(request: Request):
-    """Enable/disable endpoint called by AppAPI"""
-    data = await request.json()
-    is_enabled = data.get("enabled", False)
+@APP.put("/enabled")
+def enabled_callback(
+    enabled: bool,
+    nc: typing.Annotated[NextcloudApp, Depends(nc_app)],
+):
+    """Enable/disable callback from AppAPI."""
+    return JSONResponse(content={"error": enabled_handler(enabled, nc)})
 
-    if is_enabled:
-        start_valtimo()
-        await wait_for_valtimo(timeout=120)
+
+async def init_valtimo_task(nc: NextcloudApp):
+    """Background task for Valtimo initialization with progress reporting."""
+    nc.set_init_status(0)
+    LOGGER.info("Starting Valtimo initialization...")
+
+    start_valtimo()
+    nc.set_init_status(20)
+
+    if await wait_for_valtimo(timeout=180):
+        nc.set_init_status(80)
+        nc.set_init_status(100)
+        LOGGER.info("Valtimo initialization complete")
     else:
-        stop_valtimo()
-
-    return JSONResponse({"status": "ok"})
+        LOGGER.error("Valtimo failed to start within timeout")
 
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+# ── Catch-All Proxy ────────────────────────────────────────────────
+@APP.api_route(
+    "/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+)
 async def proxy(request: Request, path: str):
-    """Proxy all other requests to Valtimo"""
+    """Proxy all requests to Valtimo."""
+    # Build headers, stripping hop-by-hop headers
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower()
+        not in (
+            "host",
+            "connection",
+            "transfer-encoding",
+            "accept-encoding",
+        )
+    }
+
     try:
         async with httpx.AsyncClient() as client:
-            url = f"http://localhost:{VALTIMO_PORT}/{path}"
+            url = f"{VALTIMO_URL}/{path}"
 
             resp = await client.request(
                 method=request.method,
                 url=url,
                 content=await request.body(),
-                headers={
-                    k: v for k, v in request.headers.items()
-                    if k.lower() not in ("host", "content-length")
-                },
+                headers=headers,
                 params=request.query_params,
                 timeout=60,
             )
 
+            # Forward response headers, filtering problematic ones
+            resp_headers = {
+                k: v
+                for k, v in resp.headers.items()
+                if k.lower()
+                not in (
+                    "content-encoding",
+                    "transfer-encoding",
+                    "content-length",
+                )
+            }
+
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers={
-                    k: v for k, v in resp.headers.items()
-                    if k.lower() not in ("content-encoding", "transfer-encoding")
-                },
+                headers=resp_headers,
             )
     except httpx.RequestError as e:
+        LOGGER.error("Proxy error: %s", str(e))
         return JSONResponse(
             {"error": f"Proxy error: {str(e)}"},
             status_code=502,
         )
 
 
+# ── Entry Point ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host=APP_HOST, port=APP_PORT)
+    from pathlib import Path
+
+    os.chdir(Path(__file__).parent)
+    run_app(APP, log_level="info")

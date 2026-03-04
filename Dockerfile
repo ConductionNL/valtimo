@@ -9,25 +9,35 @@
 #
 # See: https://docs.valtimo.nl/
 
-# Get Valtimo from official Ritense image
-FROM ritense/valtimo-backend:12.0.0 AS valtimo-base
+# Stage 1: Python builder (Alpine for small pip install layer)
+FROM alpine:3.22 AS python-builder
 
-# Production image - use Eclipse Temurin JRE (matches upstream)
+RUN apk add --no-cache python3 py3-pip python3-dev gcc musl-dev libffi-dev
+
+WORKDIR /build
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir --break-system-packages --prefix=/python-packages -r requirements.txt
+
+# Stage 2: Get Valtimo JAR from official Ritense image
+FROM ritense/valtimo-backend:13.17.0 AS valtimo-base
+
+# Stage 3: Production image - Eclipse Temurin JRE with Python
 FROM eclipse-temurin:17-jre-jammy
 
-# Install runtime dependencies
+# Install Python runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tini \
     python3 \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies for ExApp wrapper
-RUN pip3 install --no-cache-dir \
-    "fastapi>=0.109.0" \
-    "uvicorn>=0.27.0" \
-    "httpx>=0.26.0"
+# Copy Python packages from builder
+COPY --from=python-builder /usr/lib/python3.* /usr/lib/python3.10/
+COPY --from=python-builder /usr/bin/python3 /usr/bin/python3
+COPY --from=python-builder /usr/lib/libpython3* /usr/lib/
+COPY --from=python-builder /usr/lib/libffi* /usr/lib/
+COPY --from=python-builder /python-packages/lib/python3.12/site-packages/ /usr/lib/python3.10/site-packages/
+COPY --from=python-builder /python-packages/bin/ /usr/bin/
 
 # Copy Valtimo JAR from upstream image
 COPY --from=valtimo-base /app.jar /app/valtimo.jar
@@ -36,20 +46,19 @@ COPY --from=valtimo-base /app.jar /app/valtimo.jar
 WORKDIR /app
 
 # Copy ExApp wrapper
-COPY ex_app /app/ex_app
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY ex_app/ ex_app/
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 # Create app directories
 RUN mkdir -p /app/config /app/logs
 
 # Environment variables (set by AppAPI)
 ENV APP_HOST=0.0.0.0
-ENV APP_PORT=9000
+ENV APP_PORT=23000
 ENV PYTHONUNBUFFERED=1
 
 # Valtimo configuration
-ENV VALTIMO_PORT=8080
 ENV JAVA_OPTS="-Xmx512m -Xms256m"
 
 # Spring Boot / Valtimo defaults (override via AppAPI env vars)
@@ -62,11 +71,11 @@ ENV SERVER_PORT=8080
 ENV KEYCLOAK_AUTH_SERVER_URL=http://localhost:8081
 ENV KEYCLOAK_REALM=valtimo
 
-# Expose ports: 9000 for AppAPI, 8080 for Valtimo
-EXPOSE 9000 8080
+# Expose ports: 23000 for AppAPI, 8080 for Valtimo
+EXPOSE 23000 8080
 
-# Health check - just verify the wrapper is responding (any status is ok during init)
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
-    CMD curl -s http://localhost:${APP_PORT:-9000}/heartbeat | grep -q status || exit 1
+    CMD curl -s http://localhost:${APP_PORT:-23000}/heartbeat | grep -q status || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]
