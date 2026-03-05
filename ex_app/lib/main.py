@@ -161,7 +161,7 @@ async def heartbeat():
                 return JSONResponse({"status": "ok"})
     except Exception:
         pass
-    return JSONResponse({"status": "error"}, status_code=503)
+    return JSONResponse({"status": "waiting"})
 
 
 @app.post("/init")

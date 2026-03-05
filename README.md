@@ -1,54 +1,72 @@
-# Valtimo ExApp for Nextcloud
+<p align="center">
+  <img src="img/app.svg" alt="Valtimo logo" width="80" height="80">
+</p>
 
-Nextcloud ExApp (External Application) that integrates [Valtimo](https://www.valtimo.nl/) BPM and case management.
+<h1 align="center">Valtimo</h1>
 
-## About This App
+<p align="center">
+  <strong>BPM workflow engine and case management for Nextcloud — powered by Camunda, ZGW-compliant, Common Ground compatible</strong>
+</p>
 
-This is a **Nextcloud ExApp** that packages the Valtimo BPM platform as a containerized application managed by Nextcloud's AppAPI. When you install this app, Nextcloud will automatically deploy and manage the Valtimo container.
+<p align="center">
+  <a href="https://github.com/ConductionNL/valtimo/releases"><img src="https://img.shields.io/github/v/release/ConductionNL/valtimo" alt="Latest release"></a>
+  <a href="https://github.com/ConductionNL/valtimo/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="License"></a>
+</p>
 
-**For Valtimo documentation, see:** https://docs.valtimo.nl/
+---
+
+> **DISCLAIMER**
+>
+> **Valtimo** is developed and maintained by [**Ritense**](https://www.ritense.com/). This Nextcloud app is a thin ExApp wrapper that packages Valtimo for deployment via Nextcloud's AppAPI. **Conduction B.V. does not provide support, licensing, guarantees, warranties, or services for the Valtimo platform itself.**
+>
+> For **support**, **licensing**, **pricing**, or **professional services**, contact Ritense directly:
+>
+> - Website: [https://www.ritense.com/](https://www.ritense.com/)
+> - Valtimo platform: [https://www.valtimo.nl/](https://www.valtimo.nl/)
+> - Documentation: [https://docs.valtimo.nl/](https://docs.valtimo.nl/)
+> - Source code: [https://github.com/valtimo-platform/valtimo](https://github.com/valtimo-platform/valtimo)
 
 ## What is Valtimo?
 
-Valtimo is an open-source low-code platform for Business Process Automation, built on Camunda. It is designed for Dutch municipalities and government organizations as part of the [Common Ground](https://commonground.nl/) ecosystem.
+[Valtimo](https://www.valtimo.nl/) is an open-source low-code platform for Business Process Automation, built on top of the [Camunda](https://camunda.com/) BPMN engine. Developed by [Ritense](https://www.ritense.com/), it is designed for Dutch municipalities and government organizations as part of the [Common Ground](https://commonground.nl/) ecosystem.
 
-Key features:
-- BPMN workflow engine (Camunda-based)
-- Case management with ZGW API compliance
-- Form builder (Form.io-based dynamic forms)
-- Document generation
-- Integration with Common Ground components
+Key capabilities of the Valtimo platform:
+
+- **BPMN Workflow Engine** -- Visual process modeling and execution powered by Camunda
+- **Case Management** -- Structured case handling with ZGW API compliance
+- **Form Builder** -- Dynamic forms based on Form.io for user tasks and data capture
+- **Document Generation** -- Automated document creation from templates and case data
+- **Common Ground Integration** -- Native support for ZGW APIs, Haal Centraal, and other Dutch government standards
 
 ## What This App Does
 
-- Packages Valtimo as a Nextcloud ExApp
-- Nextcloud automatically manages the container lifecycle
-- Provides BPM and case management directly within Nextcloud
-- Integrates with Nextcloud's AppAPI for seamless deployment
+This is a **Nextcloud ExApp** (External Application) that wraps the Valtimo platform as a containerized application managed by Nextcloud's AppAPI:
+
+- Packages Valtimo as a Docker container managed by Nextcloud
+- Nextcloud automatically handles the container lifecycle (start, stop, health monitoring)
+- Provides BPM and case management capabilities directly within the Nextcloud environment
+- Implements AppAPI lifecycle endpoints for seamless integration
+
+This wrapper does **not** modify or extend Valtimo itself. It provides the integration layer between Nextcloud's AppAPI and the upstream Valtimo application.
 
 ## Requirements
 
-- Nextcloud 30 or higher
-- AppAPI app installed and configured with a deploy daemon
-- Docker environment for ExApp containers
-
-### External Dependencies
-
-Valtimo requires additional services for full functionality:
-
-| Service | Purpose | Required |
-|---------|---------|----------|
-| PostgreSQL | Database | Yes |
-| Keycloak | Authentication (OIDC) | Yes |
-| RabbitMQ | Message broker | Optional |
+| Requirement | Details |
+|-------------|---------|
+| Nextcloud | 30 or higher |
+| AppAPI | Installed and configured with a deploy daemon |
+| Docker | Environment for ExApp containers |
+| PostgreSQL | Database for Valtimo (required) |
+| Keycloak | OIDC authentication provider (required) |
+| RabbitMQ | Message broker (optional) |
 
 ## Installation
 
 ### Via Nextcloud App Store
 
-1. Ensure AppAPI is installed and configured
-2. Search for "Valtimo" in the Nextcloud app store
-3. Click Install - Nextcloud will pull and start the container
+1. Ensure the **AppAPI** app is installed and configured with a deploy daemon
+2. Search for **"Valtimo"** in the Nextcloud External Apps section
+3. Click **Install** -- Nextcloud will pull and start the container
 
 ### Manual Registration
 
@@ -65,68 +83,58 @@ docker exec -u www-data nextcloud php occ app_api:app:enable valtimo
 
 ## Configuration
 
-Configure via Nextcloud Admin Settings or environment variables:
+Configure via Nextcloud Admin Settings or environment variables on the ExApp container:
 
 | Variable | Description |
 |----------|-------------|
-| `SPRING_DATASOURCE_URL` | JDBC PostgreSQL connection string |
+| `SPRING_DATASOURCE_URL` | JDBC PostgreSQL connection string (e.g., `jdbc:postgresql://host:5432/valtimo`) |
 | `SPRING_DATASOURCE_USERNAME` | Database username |
 | `SPRING_DATASOURCE_PASSWORD` | Database password |
-| `KEYCLOAK_AUTH_SERVER_URL` | Keycloak authentication server URL |
-| `KEYCLOAK_REALM` | Keycloak realm name |
+| `KEYCLOAK_URL` | Keycloak server URL (e.g., `http://keycloak:8080`) |
+| `KEYCLOAK_REALM` | Keycloak realm name (default: `commonground`) |
+| `KEYCLOAK_CLIENT_ID` | OIDC client ID for this app (default: `valtimo`) |
+| `KEYCLOAK_CLIENT_SECRET` | OIDC client secret for this app |
 
-## Development
+## Architecture
 
-### Building the Docker Image
+This ExApp uses a FastAPI wrapper that bridges Nextcloud's AppAPI with the Valtimo Spring Boot application:
 
-```bash
-# Build locally
-make build
-
-# Push to registry
-make push
-
-# Test locally
-make test
-```
-
-### Project Structure
+1. **Lifecycle management** -- Implements AppAPI endpoints (`/heartbeat`, `/init`, `/enabled`) for container orchestration
+2. **Application startup** -- Starts and manages the Valtimo Spring Boot process inside the container
+3. **Request proxying** -- Routes incoming requests from Nextcloud to the Valtimo backend
+4. **Health reporting** -- Monitors the Valtimo process and reports status back to Nextcloud
 
 ```
 valtimo/
 ├── appinfo/
-│   └── info.xml          # ExApp manifest
+│   └── info.xml          # ExApp manifest (routes, env vars, metadata)
 ├── ex_app/
 │   └── lib/
-│       └── main.py       # FastAPI wrapper for AppAPI
+│       └── main.py       # FastAPI wrapper for AppAPI integration
 ├── Dockerfile            # Container definition
-├── entrypoint.sh         # Container startup
+├── entrypoint.sh         # Container startup script
 ├── requirements.txt      # Python dependencies
 └── Makefile              # Build automation
 ```
 
-## Architecture
+## Links
 
-This ExApp uses a FastAPI wrapper that:
-
-1. Implements AppAPI lifecycle endpoints (`/heartbeat`, `/init`, `/enabled`)
-2. Starts and manages the Valtimo Spring Boot application
-3. Proxies requests to the Valtimo backend
-4. Reports health status back to Nextcloud
-
-## Related Projects
-
-| Project | Description | Links |
-|---------|-------------|-------|
-| **Valtimo** | BPM and case management platform | [Website](https://www.valtimo.nl/) / [Docs](https://docs.valtimo.nl/) / [GitHub](https://github.com/valtimo-platform) |
-| **Nextcloud AppAPI** | External app framework | [GitHub](https://github.com/nextcloud/app_api) / [Docs](https://docs.nextcloud.com/server/latest/developer_manual/exapp_development/) |
-| **OpenZaak** | ZGW API backend | [GitHub](https://github.com/open-zaak/open-zaak) |
-| **OpenKlant** | Customer interaction registry | [GitHub](https://github.com/maykinmedia/open-klant) |
+| Resource | URL |
+|----------|-----|
+| Valtimo website | [https://www.valtimo.nl/](https://www.valtimo.nl/) |
+| Valtimo documentation | [https://docs.valtimo.nl/](https://docs.valtimo.nl/) |
+| Valtimo source code | [https://github.com/valtimo-platform/valtimo](https://github.com/valtimo-platform/valtimo) |
+| Ritense (developer) | [https://www.ritense.com/](https://www.ritense.com/) |
+| This wrapper (GitHub) | [https://github.com/ConductionNL/valtimo](https://github.com/ConductionNL/valtimo) |
+| Nextcloud AppAPI | [https://github.com/nextcloud/app_api](https://github.com/nextcloud/app_api) |
+| AppAPI docs | [https://docs.nextcloud.com/server/latest/developer_manual/exapp_development/](https://docs.nextcloud.com/server/latest/developer_manual/exapp_development/) |
 
 ## License
 
-AGPL-3.0 - See [LICENSE](LICENSE) for details.
+EUPL-1.2 -- See [LICENSE](LICENSE) for details.
 
-## Author
+## Authors
 
-[Conduction B.V.](https://conduction.nl) - info@conduction.nl
+**Wrapper app:** [Conduction B.V.](https://conduction.nl) -- info@conduction.nl
+
+**Valtimo platform:** [Ritense](https://www.ritense.com/) -- see the [Valtimo GitHub organization](https://github.com/valtimo-platform) for contributors
