@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ConductionNL/valtimo/releases"><img src="https://img.shields.io/github/v/release/ConductionNL/valtimo" alt="Latest release"></a>
-  <a href="https://github.com/ConductionNL/valtimo/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="License"></a>
+  <a href="https://codeberg.org/Conduction/valtimo/releases"><img src="https://img.shields.io/gitea/v/release/Conduction/valtimo?gitea_url=https%3A%2F%2Fcodeberg.org" alt="Latest release"></a>
+  <a href="https://codeberg.org/Conduction/valtimo/src/branch/main/LICENSE"><img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="License"></a>
 </p>
 
 ---
@@ -125,7 +125,7 @@ valtimo/
 | Valtimo documentation | [https://docs.valtimo.nl/](https://docs.valtimo.nl/) |
 | Valtimo source code | [https://github.com/valtimo-platform/valtimo](https://github.com/valtimo-platform/valtimo) |
 | Ritense (developer) | [https://www.ritense.com/](https://www.ritense.com/) |
-| This wrapper (GitHub) | [https://github.com/ConductionNL/valtimo](https://github.com/ConductionNL/valtimo) |
+| This wrapper (Codeberg) | [https://codeberg.org/Conduction/valtimo](https://codeberg.org/Conduction/valtimo) |
 | Nextcloud AppAPI | [https://github.com/nextcloud/app_api](https://github.com/nextcloud/app_api) |
 | AppAPI docs | [https://docs.nextcloud.com/server/latest/developer_manual/exapp_development/](https://docs.nextcloud.com/server/latest/developer_manual/exapp_development/) |
 
