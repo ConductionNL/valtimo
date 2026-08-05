@@ -4,14 +4,15 @@ Valtimo ExApp - FastAPI wrapper for Nextcloud AppAPI integration
 Valtimo is a less-code platform for Business Process Automation.
 See: https://docs.valtimo.nl/
 """
-import os
-import subprocess
+
 import asyncio
 import base64
+import os
+import subprocess
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 # Environment variables set by AppAPI
@@ -92,7 +93,7 @@ def start_valtimo() -> None:
         print(f"OIDC configured with Keycloak at {KEYCLOAK_URL}")
 
     # Start Valtimo (Spring Boot JAR)
-    cmd = ["java"] + java_opts + ["-jar", "/app/valtimo.jar"]
+    cmd = ["java", *java_opts, "-jar", "/app/valtimo.jar"]
     VALTIMO_PROCESS = subprocess.Popen(
         cmd,
         env=env,
@@ -167,6 +168,7 @@ async def heartbeat():
 @app.post("/init")
 async def init(background_tasks: BackgroundTasks):
     """Initialization endpoint called by AppAPI during deployment"""
+
     async def do_init():
         await report_status(0)
         print("Starting Valtimo initialization...")
@@ -213,10 +215,7 @@ async def proxy(request: Request, path: str):
                 method=request.method,
                 url=url,
                 content=await request.body(),
-                headers={
-                    k: v for k, v in request.headers.items()
-                    if k.lower() not in ("host", "content-length")
-                },
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
                 params=request.query_params,
                 timeout=60,
             )
@@ -225,17 +224,17 @@ async def proxy(request: Request, path: str):
                 content=resp.content,
                 status_code=resp.status_code,
                 headers={
-                    k: v for k, v in resp.headers.items()
-                    if k.lower() not in ("content-encoding", "transfer-encoding")
+                    k: v for k, v in resp.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding")
                 },
             )
     except httpx.RequestError as e:
         return JSONResponse(
-            {"error": f"Proxy error: {str(e)}"},
+            {"error": f"Proxy error: {e!s}"},
             status_code=502,
         )
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host=APP_HOST, port=APP_PORT)

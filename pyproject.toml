@@ -1,0 +1,56 @@
+[project]
+name = "valtimo-exapp"
+version = "0.1.0"
+description = "Valtimo BPM/case-management ExApp for Nextcloud"
+license = "EUPL-1.2"
+# Measured from the Dockerfile, not guessed: the runtime is
+# `eclipse-temurin:17-jre-jammy` + `apt-get install python3`, and jammy's
+# python3 is 3.10. Targeting py311 here would let ruff's pyupgrade rules
+# rewrite this file into syntax the container cannot execute.
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["ex_app"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific rules
+    "C90",  # mccabe complexity
+]
+ignore = [
+    "E501",   # line too long (handled by the formatter)
+    "B008",   # function call in argument default — the FastAPI Depends() idiom
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["httpx.*", "fastapi.*", "uvicorn.*"]
+ignore_missing_imports = true
